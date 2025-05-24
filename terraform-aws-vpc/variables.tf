@@ -8,11 +8,11 @@ variable "vpc_region" {
   default     = null
 }
 variable "vpc_cidr" {
-  description = "The CIDR block for the VPC. Must be a valid `/20` range."
+  description = "The CIDR block for the VPC. The mask portion (after /) will be extracted and used to calculate subnet sizes."
   type        = string
   validation {
-    condition     = cidrnetmask(var.vpc_cidr) == "255.255.240.0"
-    error_message = "The VPC CIDR needs to be `/20`."
+    condition     = can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/([1-9]|[1-2][0-9]|3[0-2])$", var.vpc_cidr))
+    error_message = "The VPC CIDR must be a valid CIDR notation (e.g., 10.0.0.0/16) with a mask between 1 and 32."
   }
 }
 variable "az_count" {
@@ -242,4 +242,48 @@ variable "for_eks" {
   description = "Set to true if the VPC is for EKS"
   type        = bool
   default     = false
+}
+
+################################################################################
+# Subnet CIDR Masks
+################################################################################
+
+variable "private_subnet_cidr_mask" {
+  description = "The CIDR mask for the private subnets. Must be larger than the actual VPC CIDR mask (higher number = smaller subnet). Runtime validation will ensure this is compatible with your VPC CIDR."
+  type        = number
+  default     = 23
+  validation {
+    condition     = var.private_subnet_cidr_mask > 0 && var.private_subnet_cidr_mask <= 32
+    error_message = "The private subnet CIDR mask must be a number between 1 and 32."
+  }
+}
+
+variable "database_subnet_cidr_mask" {
+  description = "The CIDR mask for the database subnets. Must be larger than the actual VPC CIDR mask (higher number = smaller subnet). Runtime validation will ensure this is compatible with your VPC CIDR."
+  type        = number
+  default     = 24
+  validation {
+    condition     = var.database_subnet_cidr_mask > 0 && var.database_subnet_cidr_mask <= 32
+    error_message = "The database subnet CIDR mask must be a number between 1 and 32."
+  }
+}
+
+variable "public_subnet_cidr_mask" {
+  description = "The CIDR mask for the public subnets. Must be larger than the actual VPC CIDR mask (higher number = smaller subnet). Runtime validation will ensure this is compatible with your VPC CIDR."
+  type        = number
+  default     = 24
+  validation {
+    condition     = var.public_subnet_cidr_mask > 0 && var.public_subnet_cidr_mask <= 32
+    error_message = "The public subnet CIDR mask must be a number between 1 and 32."
+  }
+}
+
+variable "intra_subnet_cidr_mask" {
+  description = "The CIDR mask for the intra subnets. Must be larger than the actual VPC CIDR mask (higher number = smaller subnet). Runtime validation will ensure this is compatible with your VPC CIDR."
+  type        = number
+  default     = 28
+  validation {
+    condition     = var.intra_subnet_cidr_mask > 0 && var.intra_subnet_cidr_mask <= 32
+    error_message = "The intra subnet CIDR mask must be a number between 1 and 32."
+  }
 }
