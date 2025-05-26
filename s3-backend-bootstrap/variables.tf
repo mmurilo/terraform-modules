@@ -1,6 +1,6 @@
 variable "region" {
   type        = string
-  description = "AWS region to cretate resources"
+  description = "AWS region to create resources"
   default     = null
 }
 variable "bucket_name" {
