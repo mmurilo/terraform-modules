@@ -36,3 +36,27 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+
+# MacOS Files
+*.DS_Store
+**/.DS_Store
+
+# Secure Certificates
+*.pem
+
+# VSCode files
+*.vscode/
+
+# PyCharm files
+.idea/
+
+# Text Files
+
+.txt
+
+# Zip Files
+.zip
+
+# test files
+**/test*
+/test/*

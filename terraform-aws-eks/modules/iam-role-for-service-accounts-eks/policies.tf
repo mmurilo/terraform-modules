@@ -110,6 +110,7 @@ data "aws_iam_policy_document" "cluster_autoscaler" {
   dynamic "statement" {
     # TODO - remove *_ids at next breaking change
     for_each = toset(coalescelist(var.cluster_autoscaler_cluster_ids, var.cluster_autoscaler_cluster_names))
+
     content {
       actions = [
         "autoscaling:SetDesiredCapacity",
@@ -200,7 +201,7 @@ data "aws_iam_policy_document" "ebs_csi" {
 
   statement {
     actions   = ["ec2:CreateVolume"]
-    resources = ["*"]
+    resources = ["arn:${local.partition}:ec2:*:*:volume/*"]
 
     condition {
       test     = "StringLike"
@@ -213,7 +214,7 @@ data "aws_iam_policy_document" "ebs_csi" {
 
   statement {
     actions   = ["ec2:CreateVolume"]
-    resources = ["*"]
+    resources = ["arn:${local.partition}:ec2:*:*:volume/*"]
 
     condition {
       test     = "StringLike"
@@ -231,6 +232,11 @@ data "aws_iam_policy_document" "ebs_csi" {
       variable = "aws:RequestTag/kubernetes.io/cluster/*"
       values   = ["owned"]
     }
+  }
+
+  statement {
+    actions   = ["ec2:CreateVolume"]
+    resources = ["arn:${local.partition}:ec2:*:*:snapshot/*"]
   }
 
   statement {
@@ -301,6 +307,7 @@ data "aws_iam_policy_document" "ebs_csi" {
 
   dynamic "statement" {
     for_each = length(var.ebs_csi_kms_cmk_ids) > 0 ? [1] : []
+
     content {
       actions = [
         "kms:CreateGrant",
@@ -320,6 +327,7 @@ data "aws_iam_policy_document" "ebs_csi" {
 
   dynamic "statement" {
     for_each = length(var.ebs_csi_kms_cmk_ids) > 0 ? [1] : []
+
     content {
       actions = [
         "kms:Encrypt",
@@ -450,6 +458,7 @@ data "aws_iam_policy_document" "mountpoint_s3_csi" {
 
   dynamic "statement" {
     for_each = length(var.mountpoint_s3_csi_kms_arns) > 0 ? [1] : []
+
     content {
       actions = [
         "kms:GenerateDataKey",
@@ -496,7 +505,7 @@ data "aws_iam_policy_document" "external_dns" {
     actions = [
       "route53:ListHostedZones",
       "route53:ListResourceRecordSets",
-      "route53:ListTagsForResource",
+      "route53:ListTagsForResources",
     ]
 
     resources = ["*"]
@@ -525,7 +534,7 @@ resource "aws_iam_role_policy_attachment" "external_dns" {
 # External Secrets Policy
 ################################################################################
 
-# https://github.com/external-secrets/kubernetes-external-secrets#add-a-secret
+# https://github.com/external-secrets/external-secrets#add-a-secret
 data "aws_iam_policy_document" "external_secrets" {
   count = var.create_role && var.attach_external_secrets_policy ? 1 : 0
 
@@ -534,16 +543,21 @@ data "aws_iam_policy_document" "external_secrets" {
     resources = ["*"]
   }
 
-  statement {
-    actions = [
-      "ssm:GetParameter",
-      "ssm:GetParameters",
-    ]
-    resources = var.external_secrets_ssm_parameter_arns
+  dynamic "statement" {
+    for_each = length(var.external_secrets_ssm_parameter_arns) > 0 ? [1] : []
+
+    content {
+      actions = [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+      ]
+
+      resources = var.external_secrets_ssm_parameter_arns
+    }
   }
 
   statement {
-    actions   = ["secretsmanager:ListSecrets"]
+    actions   = ["secretsmanager:ListSecrets", "secretsmanager:BatchGetSecretValue"]
     resources = ["*"]
   }
 
@@ -552,18 +566,23 @@ data "aws_iam_policy_document" "external_secrets" {
       "secretsmanager:GetResourcePolicy",
       "secretsmanager:GetSecretValue",
       "secretsmanager:DescribeSecret",
-      "secretsmanager:ListSecretVersionIds",
+      "secretsmanager:ListSecretVersionIds"
     ]
     resources = var.external_secrets_secrets_manager_arns
   }
 
-  statement {
-    actions   = ["kms:Decrypt"]
-    resources = var.external_secrets_kms_key_arns
+  dynamic "statement" {
+    for_each = length(var.external_secrets_kms_key_arns) > 0 ? [1] : []
+
+    content {
+      actions   = ["kms:Decrypt"]
+      resources = var.external_secrets_kms_key_arns
+    }
   }
 
   dynamic "statement" {
     for_each = var.external_secrets_secrets_manager_create_permission ? [1] : []
+
     content {
       actions = [
         "secretsmanager:CreateSecret",
@@ -576,9 +595,11 @@ data "aws_iam_policy_document" "external_secrets" {
 
   dynamic "statement" {
     for_each = var.external_secrets_secrets_manager_create_permission ? [1] : []
+
     content {
       actions   = ["secretsmanager:DeleteSecret"]
       resources = var.external_secrets_secrets_manager_arns
+
       condition {
         test     = "StringEquals"
         variable = "secretsmanager:ResourceTag/managed-by"
@@ -626,6 +647,7 @@ data "aws_iam_policy_document" "fsx_lustre_csi" {
   statement {
     actions   = ["iam:CreateServiceLinkedRole"]
     resources = ["*"]
+
     condition {
       test     = "StringLike"
       variable = "iam:AWSServiceName"
@@ -640,6 +662,7 @@ data "aws_iam_policy_document" "fsx_lustre_csi" {
       "fsx:DeleteFileSystem",
       "fsx:DescribeFileSystems",
       "fsx:TagResource",
+      "fsx:UpdateFileSystem",
     ]
     resources = ["*"]
   }
@@ -834,6 +857,8 @@ data "aws_iam_policy_document" "load_balancer_controller" {
       "ec2:DescribeTags",
       "ec2:GetCoipPoolUsage",
       "ec2:DescribeCoipPools",
+      "ec2:GetSecurityGroupsForVpc",
+      "ec2:DescribeIpamPools",
       "elasticloadbalancing:DescribeLoadBalancers",
       "elasticloadbalancing:DescribeLoadBalancerAttributes",
       "elasticloadbalancing:DescribeListeners",
@@ -845,6 +870,8 @@ data "aws_iam_policy_document" "load_balancer_controller" {
       "elasticloadbalancing:DescribeTargetHealth",
       "elasticloadbalancing:DescribeTags",
       "elasticloadbalancing:DescribeTrustStores",
+      "elasticloadbalancing:DescribeListenerAttributes",
+      "elasticloadbalancing:DescribeCapacityReservation",
     ]
     resources = ["*"]
   }
@@ -1006,6 +1033,9 @@ data "aws_iam_policy_document" "load_balancer_controller" {
       "elasticloadbalancing:ModifyTargetGroup",
       "elasticloadbalancing:ModifyTargetGroupAttributes",
       "elasticloadbalancing:DeleteTargetGroup",
+      "elasticloadbalancing:ModifyListenerAttributes",
+      "elasticloadbalancing:ModifyCapacityReservation",
+      "elasticloadbalancing:ModifyIpPools"
     ]
     resources = ["*"]
 
@@ -1057,6 +1087,7 @@ data "aws_iam_policy_document" "load_balancer_controller" {
       "elasticloadbalancing:AddListenerCertificates",
       "elasticloadbalancing:RemoveListenerCertificates",
       "elasticloadbalancing:ModifyRule",
+      "elasticloadbalancing:SetRulePriorities"
     ]
     resources = ["*"]
   }
@@ -1187,6 +1218,7 @@ data "aws_iam_policy_document" "appmesh_controller" {
       "iam:CreateServiceLinkedRole"
     ]
     resources = ["arn:${local.partition}:iam::*:role/aws-service-role/appmesh.${local.dns_suffix}/AWSServiceRoleForAppMesh"]
+
     condition {
       test     = "StringLike"
       variable = "iam:AWSServiceName"
@@ -1401,6 +1433,7 @@ data "aws_iam_policy_document" "velero" {
       "s3:GetObject",
       "s3:DeleteObject",
       "s3:PutObject",
+      "s3:PutObjectTagging",
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts",
     ]
@@ -1444,6 +1477,7 @@ data "aws_iam_policy_document" "vpc_cni" {
   # arn:${local.partition}:iam::aws:policy/AmazonEKS_CNI_Policy
   dynamic "statement" {
     for_each = var.vpc_cni_enable_ipv4 ? [1] : []
+
     content {
       sid = "IPV4"
       actions = [
@@ -1467,6 +1501,7 @@ data "aws_iam_policy_document" "vpc_cni" {
   # https://docs.aws.amazon.com/eks/latest/userguide/cni-iam-role.html#cni-iam-role-create-ipv6-policy
   dynamic "statement" {
     for_each = var.vpc_cni_enable_ipv6 ? [1] : []
+
     content {
       sid = "IPV6"
       actions = [
@@ -1475,6 +1510,22 @@ data "aws_iam_policy_document" "vpc_cni" {
         "ec2:DescribeTags",
         "ec2:DescribeNetworkInterfaces",
         "ec2:DescribeInstanceTypes",
+      ]
+      resources = ["*"]
+    }
+  }
+
+  # https://docs.aws.amazon.com/eks/latest/userguide/cni-network-policy.html#cni-network-policy-setup
+  dynamic "statement" {
+    for_each = var.vpc_cni_enable_cloudwatch_logs ? [1] : []
+
+    content {
+      sid = "CloudWatchLogs"
+      actions = [
+        "logs:DescribeLogGroups",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
       ]
       resources = ["*"]
     }

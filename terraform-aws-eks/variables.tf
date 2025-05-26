@@ -174,3 +174,9 @@ variable "enable_cluster_creator_admin_permissions" {
   type        = bool
   default     = true
 }
+
+variable "attach_sso_admin_access_entries" {
+  description = "Indicates whether or not to attach the SSO Admin access entries to the cluster"
+  type        = bool
+  default     = true
+}

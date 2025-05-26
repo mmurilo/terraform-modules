@@ -41,11 +41,25 @@ output "cloudwatch_irsa_role" {
   value       = module.cloudwatch_irsa_role
 }
 
+# ############################################
+# # Addons 
+# ############################################
+
+# output "cluster_addons" {
+#   description = "outputs from EKS addons module"
+#   value       = module.eks_cluster_addons
+# }
+
+output "subnet_ids" {
+  description = "Node subnet ids"
+  value       = var.subnet_ids
+}
+
 ############################################
-# Addons 
+# IAM SSO Roles Data
 ############################################
 
-output "cluster_addons" {
-  description = "outputs from EKS addons module"
-  value       = module.eks_cluster_addons
+output "admin_sso_role" {
+  description = "IAM roles matching the AdminAccess pattern from AWS SSO"
+  value       = tolist(data.aws_iam_roles.admin_sso_roles.arns)[0]
 }
