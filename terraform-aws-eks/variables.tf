@@ -108,6 +108,60 @@ variable "cluster_addons" {
   default     = {}
 }
 
+variable "enable_coredns" {
+  description = "Enable CoreDNS addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_kube_proxy" {
+  description = "Enable kube-proxy addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_vpc_cni" {
+  description = "Enable VPC CNI addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_aws_ebs_csi_driver" {
+  description = "Enable AWS EBS CSI driver addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_aws_efs_csi_driver" {
+  description = "Enable AWS EFS CSI driver addon"
+  type        = bool
+  default     = false
+}
+
+variable "enable_amazon_cloudwatch_observability" {
+  description = "Enable Amazon CloudWatch Observability addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_snapshot_controller" {
+  description = "Enable Snapshot Controller addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_eks_pod_identity_agent" {
+  description = "Enable EKS Pod Identity Agent addon"
+  type        = bool
+  default     = true
+}
+
+variable "enable_eks_node_monitoring_agent" {
+  description = "Enable EKS Node Monitoring Agent addon"
+  type        = bool
+  default     = true
+}
+
 ################################################################################
 # EKS Managed Node Group
 ################################################################################

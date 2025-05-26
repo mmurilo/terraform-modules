@@ -23,22 +23,22 @@ output "eks" {
 
 output "vpc_cni_irsa_role" {
   description = "outputs from vpc_cni_irsa_role module"
-  value       = module.vpc_cni_irsa_role
+  value       = var.enable_vpc_cni ? module.vpc_cni_irsa_role[0] : null
 }
 
 output "ebs_csi_irsa_role" {
   description = "outputs from ebs_csi_irsa_role module"
-  value       = module.ebs_csi_irsa_role
+  value       = var.enable_aws_ebs_csi_driver ? module.ebs_csi_irsa_role[0] : null
 }
 
-# output "efs_csi_irsa_role" {
-#   description = "outputs from efs_csi_irsa_role module"
-#   value       = module.efs_csi_irsa_role
-# }
+output "efs_csi_irsa_role" {
+  description = "outputs from efs_csi_irsa_role module"
+  value       = var.enable_aws_efs_csi_driver ? module.efs_csi_irsa_role[0] : null
+}
 
 output "cloudwatch_irsa_role" {
   description = "outputs from cloudwatch_irsa_role module"
-  value       = module.cloudwatch_irsa_role
+  value       = var.enable_amazon_cloudwatch_observability ? module.cloudwatch_irsa_role[0] : null
 }
 
 # ############################################

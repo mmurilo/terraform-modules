@@ -48,59 +48,77 @@ locals {
         cidr_blocks = var.cluster_allowed_cidrs
       }
   })
-  cluster_addons = {
-    coredns = {
-      most_recent = true
-      preserve    = false
-      timeouts = {
-        create = "25m"
-        delete = "10m"
+  cluster_addons = merge(
+    var.enable_coredns ? {
+      coredns = {
+        most_recent = true
+        preserve    = false
+        timeouts = {
+          create = "25m"
+          delete = "10m"
+        }
       }
-    }
-    kube-proxy = {
-      most_recent = true
-      preserve    = false
-    }
-    vpc-cni = {
-      most_recent              = true
-      preserve                 = false
-      service_account_role_arn = try(module.vpc_cni_irsa_role.iam_role_arn, null)
-      # configuration_values = jsonencode({
-      #   env = {
-      #     ENABLE_PREFIX_DELEGATION = "true"
-      #     WARM_PREFIX_TARGET       = "1"
-      #   }
-      # })
-    }
-    aws-ebs-csi-driver = {
-      most_recent              = true
-      preserve                 = false
-      service_account_role_arn = try(module.ebs_csi_irsa_role.iam_role_arn, null)
-    }
-    aws-efs-csi-driver = {
-      most_recent              = true
-      preserve                 = false
-      service_account_role_arn = try(module.efs_csi_irsa_role.iam_role_arn, null)
-    }
-    amazon-cloudwatch-observability = {
-      most_recent              = true
-      preserve                 = false
-      service_account_role_arn = try(module.cloudwatch_irsa_role.iam_role_arn, null)
-    }
-    snapshot-controller = {
-      most_recent = true
-      preserve    = false
-    }
-    eks-pod-identity-agent = {
-      most_recent = true
-      preserve    = false
-    }
-
-    eks-node-monitoring-agent = {
-      most_recent = true
-      preserve    = false
-    }
-  }
+    } : {},
+    var.enable_kube_proxy ? {
+      kube-proxy = {
+        most_recent = true
+        preserve    = false
+      }
+    } : {},
+    var.enable_vpc_cni ? {
+      vpc-cni = {
+        most_recent              = true
+        preserve                 = false
+        service_account_role_arn = try(module.vpc_cni_irsa_role[0].iam_role_arn, null)
+        # configuration_values = jsonencode({
+        #   env = {
+        #     ENABLE_PREFIX_DELEGATION = "true"
+        #     WARM_PREFIX_TARGET       = "1"
+        #   }
+        # })
+      }
+    } : {},
+    var.enable_aws_ebs_csi_driver ? {
+      aws-ebs-csi-driver = {
+        most_recent              = true
+        preserve                 = false
+        service_account_role_arn = try(module.ebs_csi_irsa_role[0].iam_role_arn, null)
+      }
+    } : {},
+    var.enable_aws_efs_csi_driver ? {
+      aws-efs-csi-driver = {
+        most_recent              = true
+        preserve                 = false
+        service_account_role_arn = try(module.efs_csi_irsa_role[0].iam_role_arn, null)
+      }
+    } : {},
+    var.enable_amazon_cloudwatch_observability ? {
+      amazon-cloudwatch-observability = {
+        most_recent              = true
+        preserve                 = false
+        service_account_role_arn = try(module.cloudwatch_irsa_role[0].iam_role_arn, null)
+      }
+    } : {},
+    var.enable_snapshot_controller ? {
+      snapshot-controller = {
+        most_recent = true
+        preserve    = false
+      }
+    } : {},
+    var.enable_eks_pod_identity_agent ? {
+      eks-pod-identity-agent = {
+        most_recent = true
+        preserve    = false
+      }
+    } : {},
+    var.enable_eks_node_monitoring_agent ? {
+      eks-node-monitoring-agent = {
+        most_recent = true
+        preserve    = false
+      }
+    } : {},
+    var.cluster_addons
+  )
   admin_access_entries = var.attach_sso_admin_access_entries ? {
     sso-AdminUsers = {
       kubernetes_groups = []
@@ -162,6 +180,7 @@ module "eks" {
 ################################################################################
 module "vpc_cni_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_vpc_cni ? 1 : 0
 
   role_name                      = "vpc-cni-ipv4"
   attach_vpc_cni_policy          = true
@@ -180,6 +199,7 @@ module "vpc_cni_irsa_role" {
 
 module "ebs_csi_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_aws_ebs_csi_driver ? 1 : 0
 
   role_name             = "ebs-csi"
   attach_ebs_csi_policy = true
@@ -196,6 +216,7 @@ module "ebs_csi_irsa_role" {
 
 module "efs_csi_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_aws_efs_csi_driver ? 1 : 0
 
   role_name             = "efs-csi"
   attach_efs_csi_policy = true
@@ -212,6 +233,7 @@ module "efs_csi_irsa_role" {
 
 module "cloudwatch_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_amazon_cloudwatch_observability ? 1 : 0
 
   role_name                              = "cloudwatch-observability"
   attach_cloudwatch_observability_policy = true
