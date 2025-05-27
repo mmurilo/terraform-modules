@@ -1,3 +1,4 @@
+# filepath: /Users/mmurilo/Documents/projects/github/terraform-modules/terraform-aws-vpc/main.tf
 locals {
   name             = var.vpc_name
   region           = coalesce(var.vpc_region, data.aws_region.current.name)
@@ -5,19 +6,36 @@ locals {
   azs              = slice(data.aws_availability_zones.available.names, 0, var.az_count)
   vpc_this_id      = try(module.vpc.vpc_id, null)
   tags             = var.tags
-  private_subnets  = coalesce(var.private_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 3, k)])
-  database_subnets = coalesce(var.database_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k + 11)])
-  public_subnets   = coalesce(var.public_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 4, k + 9)])
-  intra_subnets    = coalesce(var.intra_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, 8, k + 252)])
+  
+  # Extract the base VPC CIDR mask from the provided CIDR
+  vpc_cidr_mask    = tonumber(split("/", local.vpc_cidr)[1])
+  
+  # Validate subnet masks are larger than VPC CIDR mask to ensure subnets are smaller than VPC
+  validate_private_mask  = var.private_subnet_cidr_mask > local.vpc_cidr_mask ? true : tobool("Private subnet mask (${var.private_subnet_cidr_mask}) must be larger than VPC CIDR mask (${local.vpc_cidr_mask})")
+  validate_database_mask = var.database_subnet_cidr_mask > local.vpc_cidr_mask ? true : tobool("Database subnet mask (${var.database_subnet_cidr_mask}) must be larger than VPC CIDR mask (${local.vpc_cidr_mask})")
+  validate_public_mask   = var.public_subnet_cidr_mask > local.vpc_cidr_mask ? true : tobool("Public subnet mask (${var.public_subnet_cidr_mask}) must be larger than VPC CIDR mask (${local.vpc_cidr_mask})")
+  validate_intra_mask    = var.intra_subnet_cidr_mask > local.vpc_cidr_mask ? true : tobool("Intra subnet mask (${var.intra_subnet_cidr_mask}) must be larger than VPC CIDR mask (${local.vpc_cidr_mask})")
+  
+  # Calculate subnet newbits (the difference between subnet mask and VPC mask)
+  private_newbits  = var.private_subnet_cidr_mask - local.vpc_cidr_mask
+  database_newbits = var.database_subnet_cidr_mask - local.vpc_cidr_mask
+  public_newbits   = var.public_subnet_cidr_mask - local.vpc_cidr_mask
+  intra_newbits    = var.intra_subnet_cidr_mask - local.vpc_cidr_mask
+  
+  # Calculate subnet CIDRs dynamically based on the VPC CIDR and specified subnet masks
+  private_subnets  = coalesce(var.private_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, local.private_newbits, k)])
+  database_subnets = coalesce(var.database_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, local.database_newbits, k + length(local.azs) * 3)])
+  public_subnets   = coalesce(var.public_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, local.public_newbits, k + length(local.azs))])
+  intra_subnets    = coalesce(var.intra_subnets, [for k, v in local.azs : cidrsubnet(local.vpc_cidr, local.intra_newbits, k + length(local.azs) * 2)])
 }
 
 data "aws_region" "current" {}
 data "aws_availability_zones" "available" {}
 
 module "vpc" {
-  source = "./modules/terraform-aws-vpc" #! FIXME - Change to upstream module and delete local module
-  # source = "terraform-aws-modules/vpc/aws"
-  # version = "5.19.0" #TODO - test new version
+  # source = "./modules/terraform-aws-vpc"
+  source = "terraform-aws-modules/vpc/aws"
+  version = "5.21.0"
 
   name = local.name
   cidr = local.vpc_cidr
