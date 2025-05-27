@@ -27,7 +27,9 @@ locals {
         cidr_blocks = [data.aws_vpc.this.cidr_block]
       }
   })
-  cluster_security_group_additional_rules = merge(var.cluster_security_group_additional_rules,
+
+  cluster_security_group_additional_rules = merge(
+    var.cluster_security_group_additional_rules,
     {
       api_from_vpc = {
         description = "API from Same VPC"
@@ -46,8 +48,8 @@ locals {
         cidr_blocks = var.cluster_allowed_cidrs
       }
   })
-  cluster_addons = merge(var.cluster_addons,
-    {
+  cluster_addons = merge(
+    var.enable_coredns ? {
       coredns = {
         most_recent = true
         preserve    = false
@@ -56,15 +58,18 @@ locals {
           delete = "10m"
         }
       }
+    } : {},
+    var.enable_kube_proxy ? {
       kube-proxy = {
         most_recent = true
         preserve    = false
       }
+    } : {},
+    var.enable_vpc_cni ? {
       vpc-cni = {
         most_recent              = true
         preserve                 = false
-        service_account_role_arn = try(module.vpc_cni_irsa_role.iam_role_arn, null)
-        # Reference docs https://docs.aws.amazon.com/eks/latest/userguide/cni-increase-ip-addresses.html
+        service_account_role_arn = try(module.vpc_cni_irsa_role[0].iam_role_arn, null)
         # configuration_values = jsonencode({
         #   env = {
         #     ENABLE_PREFIX_DELEGATION = "true"
@@ -72,42 +77,81 @@ locals {
         #   }
         # })
       }
+    } : {},
+    var.enable_aws_ebs_csi_driver ? {
       aws-ebs-csi-driver = {
         most_recent              = true
         preserve                 = false
-        service_account_role_arn = try(module.ebs_csi_irsa_role.iam_role_arn, null)
+        service_account_role_arn = try(module.ebs_csi_irsa_role[0].iam_role_arn, null)
       }
-      # aws-efs-csi-driver = {
-      #   most_recent              = true
-      #   preserve                 = false
-      #   service_account_role_arn = try(module.efs_csi_irsa_role.iam_role_arn, null)
-      # }
+    } : {},
+    var.enable_aws_efs_csi_driver ? {
+      aws-efs-csi-driver = {
+        most_recent              = true
+        preserve                 = false
+        service_account_role_arn = try(module.efs_csi_irsa_role[0].iam_role_arn, null)
+      }
+    } : {},
+    var.enable_amazon_cloudwatch_observability ? {
       amazon-cloudwatch-observability = {
         most_recent              = true
         preserve                 = false
-        service_account_role_arn = try(module.cloudwatch_irsa_role.iam_role_arn, null)
+        service_account_role_arn = try(module.cloudwatch_irsa_role[0].iam_role_arn, null)
       }
+    } : {},
+    var.enable_snapshot_controller ? {
       snapshot-controller = {
         most_recent = true
         preserve    = false
       }
+    } : {},
+    var.enable_eks_pod_identity_agent ? {
       eks-pod-identity-agent = {
         most_recent = true
         preserve    = false
       }
-  })
+    } : {},
+    var.enable_eks_node_monitoring_agent ? {
+      eks-node-monitoring-agent = {
+        most_recent = true
+        preserve    = false
+      }
+    } : {},
+    var.cluster_addons
+  )
+  admin_access_entries = var.attach_sso_admin_access_entries ? {
+    sso-AdminUsers = {
+      kubernetes_groups = []
+      principal_arn     = tolist(data.aws_iam_roles.admin_sso_roles.arns)[0]
+
+      policy_associations = {
+        ClusterAdmin = {
+          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = {
+            type = "cluster"
+          }
+        }
+      }
+    }
+  } : {}
 }
 
 data "aws_vpc" "this" {
   id = var.vpc_id
 }
 
+data "aws_iam_roles" "admin_sso_roles" {
+  name_regex  = "AWSReservedSSO_AWSAdministratorAccess_*"
+  path_prefix = "/aws-reserved/sso.amazonaws.com/"
+}
+
 ################################################################################
 # Cluster
 ################################################################################
-
 module "eks" {
-  source = "./modules/terraform-aws-eks"
+  # source = "./modules/terraform-aws-eks"
+  source  = "terraform-aws-modules/eks/aws"
+  version = "20.36.0"
 
   cluster_name                             = var.cluster_name
   cluster_version                          = var.cluster_version
@@ -124,8 +168,9 @@ module "eks" {
   eks_managed_node_groups                  = var.eks_managed_node_groups
   cluster_enabled_log_types                = var.cluster_enabled_log_types
   authentication_mode                      = var.authentication_mode
-  access_entries                           = var.access_entries
+  access_entries                           = merge(local.admin_access_entries, var.access_entries)
   enable_cluster_creator_admin_permissions = var.enable_cluster_creator_admin_permissions
+  cluster_addons                           = local.cluster_addons
   tags                                     = var.tags
   cluster_tags                             = var.cluster_tags
 }
@@ -133,79 +178,72 @@ module "eks" {
 ################################################################################
 # IRSA
 ################################################################################
-
 module "vpc_cni_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_vpc_cni ? 1 : 0
 
-  role_name = "eks-addon-vpc-cni"
-
-  attach_vpc_cni_policy = true
-  vpc_cni_enable_ipv4   = true
+  role_name                      = "vpc-cni-ipv4"
+  attach_vpc_cni_policy          = true
+  vpc_cni_enable_ipv4            = true
+  vpc_cni_enable_cloudwatch_logs = true
 
   oidc_providers = {
-    main = {
+    ex = {
       provider_arn               = module.eks.oidc_provider_arn
       namespace_service_accounts = ["kube-system:aws-node"]
     }
   }
+
+  tags = var.tags
 }
 
 module "ebs_csi_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_aws_ebs_csi_driver ? 1 : 0
 
-  role_name = "eks-addon-ebs-csi"
-
+  role_name             = "ebs-csi"
   attach_ebs_csi_policy = true
 
   oidc_providers = {
-    main = {
+    ex = {
       provider_arn               = module.eks.oidc_provider_arn
       namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
     }
   }
+
+  tags = var.tags
 }
 
-# module "efs_csi_irsa_role" {
-#   source = "./modules/iam-role-for-service-accounts-eks"
+module "efs_csi_irsa_role" {
+  source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_aws_efs_csi_driver ? 1 : 0
 
-#   role_name = "eks-addon-efs-csi"
+  role_name             = "efs-csi"
+  attach_efs_csi_policy = true
 
-#   attach_efs_csi_policy = true
+  oidc_providers = {
+    ex = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:efs-csi-controller-sa"]
+    }
+  }
 
-#   oidc_providers = {
-#     main = {
-#       provider_arn               = module.eks.oidc_provider_arn
-#       namespace_service_accounts = ["kube-system:efs-csi-controller-sa"]
-#     }
-#   }
-# }
+  tags = var.tags
+}
 
 module "cloudwatch_irsa_role" {
   source = "./modules/iam-role-for-service-accounts-eks"
+  count  = var.enable_amazon_cloudwatch_observability ? 1 : 0
 
-  role_name = "eks-addon-cloudwatch-observability"
-
+  role_name                              = "cloudwatch-observability"
   attach_cloudwatch_observability_policy = true
 
   oidc_providers = {
-    main = {
+    ex = {
       provider_arn               = module.eks.oidc_provider_arn
       namespace_service_accounts = ["amazon-cloudwatch:cloudwatch-agent"]
     }
   }
-}
 
-################################################################################
-# Addons
-################################################################################
-
-module "eks_cluster_addons" {
-  source = "./modules/terraform-aws-eks-addons"
-
-  cluster_name     = module.eks.cluster_name
-  cluster_endpoint = module.eks.cluster_endpoint
-  cluster_version  = module.eks.cluster_version
-  oidc_provider_arn = module.eks.oidc_provider_arn
-  eks_addons        = local.cluster_addons
-  tags              = var.tags
+  tags = var.tags
 }
