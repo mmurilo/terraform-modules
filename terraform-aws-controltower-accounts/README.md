@@ -70,7 +70,7 @@ output "dev_account_outputs" {
 
 * The User or role running this Terraform module must have the necessary permissions to provision products in AWS Service Catalog and create accounts in AWS Organizations.
   * The User or Role must also be associate with the AWS Control Tower Account Factory Portfolio in Service Catalog
-  * This access can be enabled using the Access Tab in the wAWS Console or `aws_servicecatalog_principal_portfolio_association` Terraform [resource](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/servicecatalog_principal_portfolio_association).
+  * This access can be enabled using the Access Tab in the [AWS Console](https://docs.aws.amazon.com/servicecatalog/latest/adminguide/catalogs_portfolios_users.html) or `aws_servicecatalog_principal_portfolio_association` Terraform [resource](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/servicecatalog_principal_portfolio_association).
 
 * **Account Factory Product Name and Version**:
   * The module uses `product_name = "AWS Control Tower Account Factory"`. Verify this is the exact name of the Account Factory product in your AWS Service Catalog.
