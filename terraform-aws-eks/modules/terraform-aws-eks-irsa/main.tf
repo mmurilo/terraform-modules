@@ -48,7 +48,8 @@ resource "aws_iam_role" "role" {
 
 # iam policy attached to the role, the policy document comes from the code calling this module
 resource "aws_iam_role_policy" "policy" {
-  name   = "${var.cluster_name}-${var.namespace}"
+  count  = length(var.policy_statements) > 0 ? 1 : 0
+  name   = "${var.cluster_name}-${var.namespace}-${var.service_account}"
   role   = aws_iam_role.role.id
   policy = data.aws_iam_policy_document.this.json
 }

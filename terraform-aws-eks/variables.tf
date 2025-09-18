@@ -179,34 +179,6 @@ variable "eks_managed_node_groups" {
   }
 }
 
-variable "eks_managed_node_group_defaults" {
-  description = "Map of EKS managed node group default configurations"
-  type = object({
-    instance_types       = list(string)
-    capacity_type        = string
-    ami_type             = string
-    min_size             = number
-    max_size             = number
-    desired_size         = number
-    labels               = map(string)
-    taints               = any
-    force_update_version = bool
-    tags                 = map(string)
-  })
-  default = {
-    capacity_type        = "ON_DEMAND"
-    instance_types       = ["m7a.2xlarge", "m7i.2xlarge", "m7i-flex.2xlarge"]
-    ami_type             = null #"AL2_ARM_64"
-    min_size             = 1
-    max_size             = 3
-    desired_size         = 1
-    labels               = {}
-    taints               = {}
-    force_update_version = true
-    tags                 = {}
-  }
-}
-
 ################################################################################
 # Access Entry
 ################################################################################

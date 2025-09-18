@@ -69,6 +69,7 @@ locals {
       vpc-cni = {
         most_recent              = true
         preserve                 = false
+        before_compute           = true
         service_account_role_arn = try(module.vpc_cni_irsa_role[0].iam_role_arn, null)
         # configuration_values = jsonencode({
         #   env = {
@@ -107,8 +108,9 @@ locals {
     } : {},
     var.enable_eks_pod_identity_agent ? {
       eks-pod-identity-agent = {
-        most_recent = true
-        preserve    = false
+        most_recent    = true
+        preserve       = false
+        before_compute = true
       }
     } : {},
     var.enable_eks_node_monitoring_agent ? {
@@ -151,26 +153,25 @@ data "aws_iam_roles" "admin_sso_roles" {
 module "eks" {
   # source = "./modules/terraform-aws-eks"
   source  = "terraform-aws-modules/eks/aws"
-  version = "20.36.0"
+  version = "21.3.1"
 
-  cluster_name                             = var.cluster_name
-  cluster_version                          = var.cluster_version
+  name                                     = var.cluster_name
+  kubernetes_version                       = var.cluster_version
   vpc_id                                   = var.vpc_id
   subnet_ids                               = var.subnet_ids
   control_plane_subnet_ids                 = var.control_plane_subnet_ids
-  cluster_endpoint_private_access          = var.cluster_endpoint_private_access
-  cluster_endpoint_public_access           = var.cluster_endpoint_public_access
-  cluster_endpoint_public_access_cidrs     = var.cluster_endpoint_public_access_cidrs
-  cluster_security_group_additional_rules  = local.cluster_security_group_additional_rules
-  cluster_encryption_config                = var.cluster_encryption_config
+  endpoint_private_access                  = var.cluster_endpoint_private_access
+  endpoint_public_access                   = var.cluster_endpoint_public_access
+  endpoint_public_access_cidrs             = var.cluster_endpoint_public_access_cidrs
+  security_group_additional_rules          = local.cluster_security_group_additional_rules
+  encryption_config                        = var.cluster_encryption_config
   node_security_group_additional_rules     = local.node_security_group_additional_rules
-  eks_managed_node_group_defaults          = var.eks_managed_node_group_defaults
   eks_managed_node_groups                  = var.eks_managed_node_groups
-  cluster_enabled_log_types                = var.cluster_enabled_log_types
+  enabled_log_types                        = var.cluster_enabled_log_types
   authentication_mode                      = var.authentication_mode
   access_entries                           = merge(local.admin_access_entries, var.access_entries)
   enable_cluster_creator_admin_permissions = var.enable_cluster_creator_admin_permissions
-  cluster_addons                           = local.cluster_addons
+  addons                                   = local.cluster_addons
   tags                                     = var.tags
   cluster_tags                             = var.cluster_tags
 }
