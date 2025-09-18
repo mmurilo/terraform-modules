@@ -49,8 +49,9 @@ resource "aws_security_group" "sg_vpc_endpoints" {
   }
 }
 module "vpc_endpoints" {
-  count  = var.create_vpce ? 1 : 0
-  source = "./modules/terraform-aws-vpc/modules/vpc-endpoints"
+  count   = var.create_vpce ? 1 : 0
+  source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
+  version = "6.0.1"
 
 
   vpc_id             = local.vpc_this_id
