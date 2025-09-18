@@ -15,7 +15,7 @@ locals {
 
 module "tf_state" {
   source  = "terraform-aws-modules/s3-bucket/aws"
-  version = "= 4.8.0"
+  version = "= 5.7.0"
 
   bucket        = local.bucket_name
   attach_policy = true
