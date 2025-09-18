@@ -170,6 +170,16 @@ variable "create_database_subnet_group" {
   type        = bool
   default     = false
 }
+variable "create_database_subnet_route_table" {
+  description = "Controls if separate route table for database should be created"
+  type        = bool
+  default     = false
+}
+variable "create_database_internet_gateway_route" {
+  description = "Controls if an internet gateway route for public database access should be created"
+  type        = bool
+  default     = false
+}
 variable "create_intra_subnets" {
   description = "Controls if intra subnets should be created"
   type        = bool
