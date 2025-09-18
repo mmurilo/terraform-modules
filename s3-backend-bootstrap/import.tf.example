@@ -1,4 +1,9 @@
 import {
+  to = aws_dynamodb_table.dynamodb-terraform-state-lock
+  id = local.dynamodb_table_name
+}
+
+import {
   to = module.tf_state.aws_s3_bucket.this[0]
   id = local.bucket_name
 }
