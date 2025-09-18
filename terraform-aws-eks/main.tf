@@ -69,6 +69,7 @@ locals {
       vpc-cni = {
         most_recent              = true
         preserve                 = false
+        before_compute           = true
         service_account_role_arn = try(module.vpc_cni_irsa_role[0].iam_role_arn, null)
         # configuration_values = jsonencode({
         #   env = {
@@ -107,8 +108,9 @@ locals {
     } : {},
     var.enable_eks_pod_identity_agent ? {
       eks-pod-identity-agent = {
-        most_recent = true
-        preserve    = false
+        most_recent    = true
+        preserve       = false
+        before_compute = true
       }
     } : {},
     var.enable_eks_node_monitoring_agent ? {
