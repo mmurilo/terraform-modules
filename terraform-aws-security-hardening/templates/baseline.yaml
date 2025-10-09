@@ -1,0 +1,744 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Enhanced organization per-account security baseline with KMS key creation (S3 PAB, EBS Encryption by Default, IAM Password Policy, AWS Support Role)
+
+Parameters:
+  # AWS Support Role Configuration
+  CreateAwsSupportRole:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Whether to create AWS Support role for incident management
+  AwsSupportRoleName:
+    Type: String
+    Default: "AWSSupport-IncidentManagement"
+    Description: Name of the AWS Support role
+  AwsSupportRoleRequireMfa:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Whether to require MFA for AWS Support role assumption
+  AwsSupportRoleMaxSessionDuration:
+    Type: Number
+    Default: 3600
+    MinValue: 3600
+    MaxValue: 43200
+    Description: Maximum session duration for AWS Support role (seconds)
+
+  # Support Role Trusted Entities (NEW)
+  AwsSupportTrustedEntitiesMode:
+    Type: String
+    AllowedValues: ["root", "custom"]
+    Default: "root"
+    Description: Select who can assume the Support role (root=current account root, custom=provide ARNs)
+  AwsSupportTrustedEntities:
+    Type: CommaDelimitedList
+    Description: Comma-separated list of trusted entity ARNs allowed to assume the Support role (used when Mode is custom)
+
+  # S3 Public Access Block Configuration
+  S3BlockPublicAcls:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Block public ACLs for S3 buckets
+  S3BlockPublicPolicy:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Block public bucket policies for S3 buckets
+  S3IgnorePublicAcls:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Ignore public ACLs for S3 buckets
+  S3RestrictPublicBuckets:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Restrict public bucket policies for S3 buckets
+
+  # EBS Encryption Configuration
+  EBSEncryptionByDefault:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Enable EBS encryption by default
+
+  # KMS Key Configuration (NEW)
+  CreateEbsKmsKey:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Whether to create a dedicated KMS key for EBS encryption
+  EbsKmsKeyAlias:
+    Type: String
+    Default: "alias/security-baseline-ebs-encryption"
+    Description: Alias for the EBS encryption KMS key (must start with 'alias/')
+  EbsKmsKeyRotation:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Enable automatic rotation for the EBS encryption KMS key
+  EbsKmsKeyDeletionWindow:
+    Type: Number
+    Default: 7
+    MinValue: 7
+    MaxValue: 30
+    Description: KMS key deletion window in days
+
+  # Existing KMS Key (Alternative)
+  EbsDefaultKmsKeyId:
+    Type: String
+    Default: ""
+    Description: ARN of existing KMS key to use for EBS encryption (alternative to creating new key)
+
+  # IAM Password Policy Configuration
+  CreatePasswordPolicy:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Whether to create IAM password policy (us-east-1 only)
+  PasswordMinLength:
+    Type: Number
+    Default: 14
+    MinValue: 6
+    MaxValue: 128
+    Description: Minimum password length
+  PasswordRequireSymbols:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Require symbols in passwords
+  PasswordRequireNumbers:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Require numbers in passwords
+  PasswordRequireUppercase:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Require uppercase characters in passwords
+  PasswordRequireLowercase:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Require lowercase characters in passwords
+  PasswordAllowUsersToChange:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Allow users to change their own passwords
+  PasswordMaxAge:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 1095
+    Description: Maximum password age in days
+  PasswordReusePrevention:
+    Type: Number
+    Default: 24
+    MinValue: 1
+    MaxValue: 24
+    Description: Number of previous passwords to prevent reuse
+  PasswordHardExpiry:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Prevent password changes after expiration
+
+  # IAM Access Analyzer Configuration (NEW - IAM.28)
+  CreateIamAccessAnalyzer:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Whether to create IAM Access Analyzer external access analyzer (SecurityHub IAM.28)
+  IamAccessAnalyzerName:
+    Type: String
+    Default: "security-baseline-external-analyzer"
+    Description: Name of the IAM Access Analyzer
+  IamAccessAnalyzerType:
+    Type: String
+    AllowedValues: ["ACCOUNT", "ORGANIZATION", "ORGANIZATION_UNUSED_ACCESS"]
+    Default: "ACCOUNT"
+    Description: |
+      Type of IAM Access Analyzer:
+      - ACCOUNT: External access analyzer for account (IAM.28 compliant)
+      - ORGANIZATION: External access analyzer for organization (IAM.28 compliant)
+      - ORGANIZATION_UNUSED_ACCESS: Unused access analyzer (NOT IAM.28 compliant)
+      Note: For SecurityHub IAM.28 compliance, use ACCOUNT or ORGANIZATION only.
+
+  # Unused Access Configuration (conditional on analyzer type)
+  UnusedAccessAge:
+    Type: Number
+    Default: 90
+    MinValue: 1
+    MaxValue: 365
+    Description: Number of days to consider access as unused (only applies to ORGANIZATION_UNUSED_ACCESS type)
+
+  # Archive Rules Configuration
+  CreateArchiveRules:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: Whether to create default archive rules for the analyzer
+  ArchiveRuleS3BucketExclusion:
+    Type: String
+    Default: ""
+    Description: S3 bucket name to exclude from findings (creates archive rule if provided)
+
+Conditions:
+  # Region and basic conditions
+  IsUsEast1: !Equals [!Ref "AWS::Region", "us-east-1"]
+
+  # Password policy conditions
+  DoPasswordPolicy:
+    !And [!Condition IsUsEast1, !Equals [!Ref CreatePasswordPolicy, "true"]]
+
+  # AWS Support role conditions
+  DoAwsSupportRole: !Equals [!Ref CreateAwsSupportRole, "true"]
+  RequireMfaForSupportRole:
+    !And [
+      !Condition DoAwsSupportRole,
+      !Equals [!Ref AwsSupportRoleRequireMfa, "true"],
+    ]
+
+  # Support role trust entities mode (NEW)
+  UseCustomSupportTrustedEntities:
+    !And [
+      !Condition DoAwsSupportRole,
+      !Equals [!Ref AwsSupportTrustedEntitiesMode, "custom"],
+    ]
+
+  # KMS key conditions (NEW)
+  DoCreateEbsKmsKey: !Equals [!Ref CreateEbsKmsKey, "true"]
+  UseExistingEbsKey: !Not [!Equals [!Ref EbsDefaultKmsKeyId, ""]]
+  UseAnyEbsKey: !Or [!Condition DoCreateEbsKmsKey, !Condition UseExistingEbsKey]
+  EnableKeyRotation:
+    !And [
+      !Condition DoCreateEbsKmsKey,
+      !Equals [!Ref EbsKmsKeyRotation, "true"],
+    ]
+
+  # S3 All Settings Enabled Check (restored for outputs)
+  S3AllSettingsEnabled:
+    !And [
+      !Equals [!Ref S3BlockPublicAcls, "true"],
+      !Equals [!Ref S3BlockPublicPolicy, "true"],
+      !Equals [!Ref S3IgnorePublicAcls, "true"],
+      !Equals [!Ref S3RestrictPublicBuckets, "true"],
+    ]
+
+  # IAM Access Analyzer conditions (NEW - IAM.28)
+  DoIamAccessAnalyzer: !Equals [!Ref CreateIamAccessAnalyzer, "true"]
+  IsUnusedAccessAnalyzer:
+    !Equals [!Ref IamAccessAnalyzerType, "ORGANIZATION_UNUSED_ACCESS"]
+  IsExternalAccessAnalyzer:
+    !Or [
+      !Equals [!Ref IamAccessAnalyzerType, "ACCOUNT"],
+      !Equals [!Ref IamAccessAnalyzerType, "ORGANIZATION"],
+    ]
+  DoArchiveRules:
+    !And [
+      !Condition DoIamAccessAnalyzer,
+      !Equals [!Ref CreateArchiveRules, "true"],
+    ]
+  DoS3BucketArchiveRule:
+    !And [
+      !Condition DoIamAccessAnalyzer,
+      !Not [!Equals [!Ref ArchiveRuleS3BucketExclusion, ""]],
+    ]
+
+Resources:
+  # ============================================================================
+  # Customer Managed Policy for Account Baseline Permissions (CIS 1.15 Compliant)
+  # ============================================================================
+  AccountBaselinePermissionsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "SecurityBaseline-AccountPermissions-${AWS::AccountId}"
+      Description: "Managed policy for account baseline Lambda function permissions - CIS 1.15 compliant"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutAccountPublicAccessBlock
+              - s3:GetAccountPublicAccessBlock
+              - ec2:EnableEbsEncryptionByDefault
+              - ec2:DisableEbsEncryptionByDefault
+              - ec2:GetEbsEncryptionByDefault
+              - ec2:PutEbsDefaultKmsKeyId
+              - ec2:GetEbsDefaultKmsKeyId
+              - ec2:ResetEbsDefaultKmsKeyId
+              - iam:UpdateAccountPasswordPolicy
+              - iam:GetAccountPasswordPolicy
+              - iam:DeleteAccountPasswordPolicy
+            Resource: "*"
+
+  # ============================================================================
+  # Lambda Execution Role for Custom Resources
+  # ============================================================================
+  AccountBaselineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Ref AccountBaselinePermissionsPolicy
+
+  # ============================================================================
+  # Lambda Function for Account-Level Settings
+  # ============================================================================
+  AccountBaselineLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "security-baseline-${AWS::AccountId}"
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt AccountBaselineRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          import logging
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          def lambda_handler(event, context):
+              try:
+                  logger.info(f"Event: {json.dumps(event)}")
+                  
+                  request_type = event['RequestType']
+                  resource_type = event['ResourceProperties'].get('ResourceType')
+                  
+                  if resource_type == 'S3AccountPublicAccessBlock':
+                      handle_s3_pab(event, context)
+                  elif resource_type == 'EBSEncryptionByDefault':
+                      handle_ebs_encryption(event, context)
+                  elif resource_type == 'EBSDefaultKmsKey':
+                      handle_ebs_kms_key(event, context)
+                  elif resource_type == 'IAMAccountPasswordPolicy':
+                      handle_iam_password_policy(event, context)
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason="Unknown resource type")
+                      
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, reason=str(e))
+
+          def handle_s3_pab(event, context):
+              s3control = boto3.client('s3control')
+              account_id = context.invoked_function_arn.split(':')[4]
+              
+              props = event['ResourceProperties']
+              
+              if event['RequestType'] in ['Create', 'Update']:
+                  s3control.put_public_access_block(
+                      AccountId=account_id,
+                      PublicAccessBlockConfiguration={
+                          'BlockPublicAcls': props.get('BlockPublicAcls', 'false').lower() == 'true',
+                          'IgnorePublicAcls': props.get('IgnorePublicAcls', 'false').lower() == 'true',
+                          'BlockPublicPolicy': props.get('BlockPublicPolicy', 'false').lower() == 'true',
+                          'RestrictPublicBuckets': props.get('RestrictPublicBuckets', 'false').lower() == 'true'
+                      }
+                  )
+                  logger.info("S3 Account Public Access Block configured successfully")
+              
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {'AccountId': account_id})
+
+          def handle_ebs_encryption(event, context):
+              ec2 = boto3.client('ec2')
+              props = event['ResourceProperties']
+              
+              if event['RequestType'] in ['Create', 'Update']:
+                  enabled = props.get('Enabled', 'false').lower() == 'true'
+                  if enabled:
+                      ec2.enable_ebs_encryption_by_default()
+                      logger.info("EBS encryption by default enabled")
+                  else:
+                      ec2.disable_ebs_encryption_by_default()
+                      logger.info("EBS encryption by default disabled")
+              elif event['RequestType'] == 'Delete':
+                  ec2.disable_ebs_encryption_by_default()
+                  logger.info("EBS encryption by default disabled on delete")
+              
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+          def handle_ebs_kms_key(event, context):
+              ec2 = boto3.client('ec2')
+              props = event['ResourceProperties']
+              
+              if event['RequestType'] in ['Create', 'Update']:
+                  kms_key_id = props.get('KmsKeyId', '')
+                  if kms_key_id:
+                      ec2.put_ebs_default_kms_key_id(KmsKeyId=kms_key_id)
+                      logger.info(f"EBS default KMS key set to: {kms_key_id}")
+                  else:
+                      logger.info("No KMS key ID provided, skipping")
+              elif event['RequestType'] == 'Delete':
+                  try:
+                      ec2.reset_ebs_default_kms_key_id()
+                      logger.info("EBS default KMS key reset")
+                  except:
+                      logger.info("No default KMS key to reset")
+              
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+          def handle_iam_password_policy(event, context):
+              iam = boto3.client('iam')
+              props = event['ResourceProperties']
+              
+              if event['RequestType'] in ['Create', 'Update']:
+                  password_policy = {
+                      'MinimumPasswordLength': int(props.get('MinimumPasswordLength', 14)),
+                      'RequireSymbols': props.get('RequireSymbols', 'true').lower() == 'true',
+                      'RequireNumbers': props.get('RequireNumbers', 'true').lower() == 'true',
+                      'RequireUppercaseCharacters': props.get('RequireUppercaseCharacters', 'true').lower() == 'true',
+                      'RequireLowercaseCharacters': props.get('RequireLowercaseCharacters', 'true').lower() == 'true',
+                      'AllowUsersToChangePassword': props.get('AllowUsersToChangePassword', 'true').lower() == 'true',
+                      'MaxPasswordAge': int(props.get('MaxPasswordAge', 90)),
+                      'PasswordReusePrevention': int(props.get('PasswordReusePrevention', 24)),
+                      'HardExpiry': props.get('HardExpiry', 'false').lower() == 'true'
+                  }
+                  iam.update_account_password_policy(**password_policy)
+                  logger.info("IAM account password policy updated")
+              elif event['RequestType'] == 'Delete':
+                  try:
+                      iam.delete_account_password_policy()
+                      logger.info("IAM account password policy deleted")
+                  except iam.exceptions.NoSuchEntityException:
+                      logger.info("No password policy to delete")
+              
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+
+  # ============================================================================
+  # Custom Resources for Account-Level Settings
+  # ============================================================================
+  S3AccountPublicAccessBlock:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt AccountBaselineLambda.Arn
+      ResourceType: S3AccountPublicAccessBlock
+      BlockPublicAcls: !Ref S3BlockPublicAcls
+      BlockPublicPolicy: !Ref S3BlockPublicPolicy
+      IgnorePublicAcls: !Ref S3IgnorePublicAcls
+      RestrictPublicBuckets: !Ref S3RestrictPublicBuckets
+
+  EBSEncryptionByDefaultResource:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt AccountBaselineLambda.Arn
+      ResourceType: EBSEncryptionByDefault
+      Enabled: !Ref EBSEncryptionByDefault
+
+  EbsDefaultKmsKeyResource:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: UseAnyEbsKey
+    Properties:
+      ServiceToken: !GetAtt AccountBaselineLambda.Arn
+      ResourceType: EBSDefaultKmsKey
+      KmsKeyId: !If
+        - DoCreateEbsKmsKey
+        - !Ref EbsEncryptionKmsKey
+        - !Ref EbsDefaultKmsKeyId
+    DependsOn:
+      - EBSEncryptionByDefaultResource
+
+  AccountPasswordPolicy:
+    Type: AWS::CloudFormation::CustomResource
+    Condition: DoPasswordPolicy
+    Properties:
+      ServiceToken: !GetAtt AccountBaselineLambda.Arn
+      ResourceType: IAMAccountPasswordPolicy
+      MinimumPasswordLength: !Ref PasswordMinLength
+      RequireSymbols: !Ref PasswordRequireSymbols
+      RequireNumbers: !Ref PasswordRequireNumbers
+      RequireUppercaseCharacters: !Ref PasswordRequireUppercase
+      RequireLowercaseCharacters: !Ref PasswordRequireLowercase
+      AllowUsersToChangePassword: !Ref PasswordAllowUsersToChange
+      MaxPasswordAge: !Ref PasswordMaxAge
+      PasswordReusePrevention: !Ref PasswordReusePrevention
+      HardExpiry: !Ref PasswordHardExpiry
+
+  # ============================================================================
+  # KMS Key for EBS Encryption (NEW - Enhanced EC2.7 Control)
+  # ============================================================================
+  EbsEncryptionKmsKey:
+    Type: AWS::KMS::Key
+    Condition: DoCreateEbsKmsKey
+    Properties:
+      Description: "KMS key for EBS volume encryption - SecurityHub EC2.7 compliance"
+      Enabled: true
+      EnableKeyRotation: !If [EnableKeyRotation, true, false]
+      PendingWindowInDays: !Ref EbsKmsKeyDeletionWindow
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "Enable IAM User Permissions"
+            Effect: "Allow"
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: "Allow use of the key for EBS"
+            Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+            Action:
+              - "kms:Encrypt"
+              - "kms:Decrypt"
+              - "kms:ReEncrypt*"
+              - "kms:GenerateDataKey*"
+              - "kms:DescribeKey"
+              - "kms:CreateGrant"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "ec2.${AWS::Region}.amazonaws.com"
+              Bool:
+                "kms:GrantIsForAWSResource": "true"
+      Tags:
+        - Key: "Name"
+          Value: "security-baseline-ebs-kms-key"
+        - Key: "SecurityHub"
+          Value: "EC2.7"
+        - Key: "Purpose"
+          Value: "KMS key for EBS default encryption"
+        - Key: "ManagedBy"
+          Value: "cloudformation"
+
+  # KMS Key Alias (NEW)
+  EbsEncryptionKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: DoCreateEbsKmsKey
+    Properties:
+      AliasName: !Ref EbsKmsKeyAlias
+      TargetKeyId: !Ref EbsEncryptionKmsKey
+
+  # ============================================================================
+  # NOTE: Account-level settings (EBS KMS Key, IAM Password Policy) should be
+  # handled at the Terraform level in the parent module, not in StackSet templates
+  # ============================================================================
+
+  # ============================================================================
+  # AWS Support Role (SecurityHub IAM.18)
+  # ============================================================================
+  AwsSupportRole:
+    Type: AWS::IAM::Role
+    Condition: DoAwsSupportRole
+    Properties:
+      RoleName: !Ref AwsSupportRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !If
+                - UseCustomSupportTrustedEntities
+                - !Ref AwsSupportTrustedEntities
+                - [!Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"]
+            Action: sts:AssumeRole
+            Condition: !If
+              - RequireMfaForSupportRole
+              - Bool:
+                  aws:MultiFactorAuthPresent: "true"
+              - !Ref "AWS::NoValue"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSSupportAccess"
+      MaxSessionDuration: !Ref AwsSupportRoleMaxSessionDuration
+      Path: "/"
+      Tags:
+        - Key: Purpose
+          Value: "AWS Support access for incident management"
+        - Key: SecurityControl
+          Value: "IAM.18"
+        - Key: ManagedBy
+          Value: "cloudformation"
+
+  # ============================================================================
+  # IAM Access Analyzer (SecurityHub IAM.28)
+  # ============================================================================
+  IamAccessAnalyzer:
+    Type: AWS::AccessAnalyzer::Analyzer
+    Condition: DoIamAccessAnalyzer
+    Properties:
+      AnalyzerName: !Ref IamAccessAnalyzerName
+      Type: !Ref IamAccessAnalyzerType
+      AnalyzerConfiguration: !If
+        - IsUnusedAccessAnalyzer
+        - UnusedAccessConfiguration:
+            UnusedAccessAge: !Ref UnusedAccessAge
+        - !Ref "AWS::NoValue"
+      # Archive Rules as properties of the analyzer
+      ArchiveRules: !If
+        - DoArchiveRules
+        - !If
+          - DoS3BucketArchiveRule
+          - # Both rules when S3 bucket exclusion is provided
+            - RuleName: "archive-public-access"
+              Filter:
+                - Property: "isPublic"
+                  Eq:
+                    - "true"
+            - RuleName: "archive-s3-bucket-exclusion"
+              Filter:
+                - Property: "resourceType"
+                  Eq:
+                    - "AWS::S3::Bucket"
+                - Property: "resource"
+                  Contains:
+                    - !Ref ArchiveRuleS3BucketExclusion
+          - # Only public access rule when no S3 bucket exclusion
+            - RuleName: "archive-public-access"
+              Filter:
+                - Property: "isPublic"
+                  Eq:
+                    - "true"
+        - !If
+          - DoS3BucketArchiveRule
+          - # Only S3 bucket rule when archive rules are disabled but S3 exclusion provided
+            - RuleName: "archive-s3-bucket-exclusion"
+              Filter:
+                - Property: "resourceType"
+                  Eq:
+                    - "AWS::S3::Bucket"
+                - Property: "resource"
+                  Contains:
+                    - !Ref ArchiveRuleS3BucketExclusion
+          - !Ref "AWS::NoValue"
+      Tags:
+        - Key: Purpose
+          Value: !If
+            - IsUnusedAccessAnalyzer
+            - "Unused access analysis for identifying unused permissions"
+            - "External access analysis for unintended resource sharing"
+        - Key: SecurityControl
+          Value: "IAM.28"
+        - Key: ManagedBy
+          Value: "cloudformation"
+
+Outputs:
+  # Account-Level Security Controls (deployed via Custom Resources)
+  S3PublicAccessBlockEnabled:
+    Description: "Whether S3 public access block is enabled"
+    Value: !If [S3AllSettingsEnabled, "true", "false"]
+
+  EbsEncryptionByDefaultEnabled:
+    Description: "Whether EBS encryption by default is enabled"
+    Value: !Ref EBSEncryptionByDefault
+
+  # KMS Outputs (NEW)
+  EbsKmsKeyCreated:
+    Condition: DoCreateEbsKmsKey
+    Description: "Whether a new KMS key was created for EBS encryption"
+    Value: "true"
+
+  EbsKmsKeyId:
+    Condition: DoCreateEbsKmsKey
+    Description: "ID of the created KMS key for EBS encryption"
+    Value: !Ref EbsEncryptionKmsKey
+
+  EbsKmsKeyArn:
+    Condition: DoCreateEbsKmsKey
+    Description: "ARN of the created KMS key for EBS encryption"
+    Value: !GetAtt EbsEncryptionKmsKey.Arn
+
+  EbsKmsKeyAlias:
+    Condition: DoCreateEbsKmsKey
+    Description: "Alias of the created KMS key for EBS encryption"
+    Value: !Ref EbsKmsKeyAlias
+
+  EbsDefaultKeyInUse:
+    Condition: UseAnyEbsKey
+    Description: "ARN of the KMS key used for default EBS encryption"
+    Value: !If
+      - DoCreateEbsKmsKey
+      - !GetAtt EbsEncryptionKmsKey.Arn
+      - !Ref EbsDefaultKmsKeyId
+
+  # Password Policy Outputs
+  AppliedPasswordPolicy:
+    Value: !If [DoPasswordPolicy, "true", "false"]
+    Description: "Whether IAM password policy was applied"
+
+  # AWS Support Role Outputs
+  AwsSupportRoleCreated:
+    Value: !If [DoAwsSupportRole, "true", "false"]
+    Description: "Whether AWS Support role was created"
+
+  AwsSupportRoleArn:
+    Condition: DoAwsSupportRole
+    Value: !GetAtt AwsSupportRole.Arn
+    Description: "ARN of the AWS Support role for incident management"
+
+  # IAM Access Analyzer Outputs (NEW - IAM.28)
+  IamAccessAnalyzerCreated:
+    Value: !If [DoIamAccessAnalyzer, "true", "false"]
+    Description: "Whether IAM Access Analyzer was created"
+
+  IamAccessAnalyzerArn:
+    Condition: DoIamAccessAnalyzer
+    Value: !GetAtt IamAccessAnalyzer.Arn
+    Description: "ARN of the IAM Access Analyzer for external access analysis"
+
+  IamAccessAnalyzerName:
+    Condition: DoIamAccessAnalyzer
+    Value: !Ref IamAccessAnalyzerName
+    Description: "Name of the IAM Access Analyzer"
+
+  IamAccessAnalyzerType:
+    Condition: DoIamAccessAnalyzer
+    Value: !Ref IamAccessAnalyzerType
+    Description: "Type of the IAM Access Analyzer"
+
+  IamAccessAnalyzerIam28Compliant:
+    Condition: DoIamAccessAnalyzer
+    Value: !If [IsExternalAccessAnalyzer, "true", "false"]
+    Description: "Whether the analyzer is compliant with SecurityHub IAM.28 control (requires external access analyzer)"
+
+  IamAccessAnalyzerUsedUnusedAccessConfig:
+    Condition: IsUnusedAccessAnalyzer
+    Value: !Sub "Unused access age: ${UnusedAccessAge} days"
+    Description: "Unused access configuration for the analyzer"
+
+  IamAccessAnalyzerArchiveRulesCreated:
+    Value: !If
+      - DoArchiveRules
+      - !If
+        - DoS3BucketArchiveRule
+        - "2"
+        - "1"
+      - !If
+        - DoS3BucketArchiveRule
+        - "1"
+        - "0"
+    Description: "Number of archive rules configured for the analyzer"
+
+  # Compliance Summary
+  SecurityControlsCompliance:
+    Description: "Summary of SecurityHub controls compliance"
+    Value: !Sub
+      - |
+        {
+          "S3.1": "${S3Config} - S3 public access blocked account-wide",
+          "EC2.7": "${EbsConfig} - EBS encryption by default enabled",
+          "IAM.7-17": "${PwdConfig} - IAM password policy applied",
+          "IAM.18": "${SupportRole} - AWS Support role created",
+          "IAM.28": "${AccessAnalyzer} - IAM Access Analyzer external access analyzer enabled",
+          "KMS_ENHANCEMENT": "${KmsKey} - Custom KMS key for EBS encryption"
+        }
+      - S3Config: !If [S3AllSettingsEnabled, "COMPLIANT", "NON-COMPLIANT"]
+        EbsConfig: !Ref EBSEncryptionByDefault
+        PwdConfig: !If [DoPasswordPolicy, "APPLIED", "SKIPPED"]
+        SupportRole: !Ref CreateAwsSupportRole
+        AccessAnalyzer: !Ref CreateIamAccessAnalyzer
+        KmsKey: !Ref CreateEbsKmsKey
